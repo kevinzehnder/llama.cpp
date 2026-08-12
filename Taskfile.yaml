@@ -32,6 +32,9 @@ vars:
 
 env:
   GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
+  OMP_NUM_THREADS: '6'
+  OMP_DYNAMIC: 'false'
+  OMP_PROC_BIND: 'true'
 
 tasks:
   default:
