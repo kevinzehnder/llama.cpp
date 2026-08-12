@@ -86,6 +86,7 @@ tasks:
         --models-preset {{.ROUTER_PRESET}}
         --models-max 1
         --sleep-idle-seconds 120
+        --flash-attn on
         --host {{.HOST}}
         --port {{.PORT}}
 
