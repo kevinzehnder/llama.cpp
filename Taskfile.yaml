@@ -6,29 +6,12 @@ vars:
   CUDA_ARCH: '86'
   HOST: 127.0.0.1
   PORT: '8080'
-  E4B_CONTEXT: '8192'
-  NGL_CPU: '0'
-  NGL_GPU: '99'
-
-  MODEL_E4B: 'ggml-org/gemma-4-E4B-it-GGUF:Q4_0'
-
-  HF_SNAPSHOT_26B: /home/kevinzehnder/.cache/huggingface/hub/models--ggml-org--gemma-4-26B-A4B-it-GGUF/snapshots/ae4d537a6345467d1c86bb5cc0d4505ff3ebe0f3
-  MODEL_26B: '{{.HF_SNAPSHOT_26B}}/gemma-4-26B-A4B-it-Q4_K_M.gguf'
-  MMPROJ_26B: '{{.HF_SNAPSHOT_26B}}/mmproj-gemma-4-26B-A4B-it-Q8_0.gguf'
-
-  TEST_PROMPT_E4B: GPU llama.cpp Gemma 4 E4B works locally on this machine.
-  TEST_PROMPT_26B: GPU llama.cpp Gemma 4 26B A4B works locally on this machine.
-
-  SCANNER_PIDFILE: /tmp/llamacpp-scanner.pid
-  SCANNER_LOGFILE: /tmp/llamacpp-scanner.log
   ROUTER_PRESET: '{{.TASKFILE_DIR}}/models-router.ini'
-
-  # Qwen 3.6 27B (Unsloth GGUF via Hugging Face)
-  QWEN27_REPO: 'unsloth/Qwen3.6-27B-GGUF'
-  QWEN27_SPEED_QUANT: 'UD-Q3_K_XL'
-  QWEN27_QUALITY_QUANT: 'UD-Q4_K_XL'
-  QWEN27_CONTEXT_SPEED: '131072'
-  QWEN27_CONTEXT_QUALITY: '131072'
+  EMBED_PORT: '8081'
+  EMBED_REPO: 'ggml-org/bge-m3-Q8_0-GGUF'
+  EMBED_FILE: 'bge-m3-q8_0.gguf'
+  EMBED_PIDFILE: /tmp/llamacpp-embed.pid
+  EMBED_LOGFILE: /tmp/llamacpp-embed.log
 
 env:
   GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
@@ -43,14 +26,13 @@ tasks:
       - task --list
 
   paths:
-    desc: Print resolved model and binary paths
+    desc: Print router paths and endpoint
     cmds:
       - echo "BUILD_DIR={{.BUILD_DIR}}"
-      - echo "MODEL_E4B={{.MODEL_E4B}}"
-      - echo "MODEL_26B={{.MODEL_26B}}"
-      - echo "MMPROJ_26B={{.MMPROJ_26B}}"
+      - echo "ROUTER_PRESET={{.ROUTER_PRESET}}"
       - echo "SERVER=./{{.BUILD_DIR}}/bin/llama-server"
-      - echo "CLI=./{{.BUILD_DIR}}/bin/llama-cli"
+      - echo "ROUTER=http://{{.HOST}}:{{.PORT}}"
+      - echo "EMBEDDINGS=http://{{.HOST}}:{{.EMBED_PORT}}"
 
   configure:
     desc: Configure llama.cpp with CUDA enabled for RTX 3070 (sm_86)
@@ -79,10 +61,8 @@ tasks:
       - nvidia-smi
 
   server:router:
-    desc: Start llama.cpp router (dynamic per-request model switching via /models and model IDs)
+    desc: Start the local model router
     deps: [build]
-    env:
-      GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
     cmds:
       - >-
         ./{{.BUILD_DIR}}/bin/llama-server
@@ -93,294 +73,109 @@ tasks:
         --host {{.HOST}}
         --port {{.PORT}}
 
-  server:gpu:qwen27b:speed:
-    desc: Start Qwen3.6-27B speed profile (UD-Q3_K_XL, 128k ctx, non-thinking)
-    deps: [build]
-    env:
-      GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
-      LLAMA_CACHE: '{{.TASKFILE_DIR}}/models/hf-cache'
-    cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-server
-        -hf {{.QWEN27_REPO}}:{{.QWEN27_SPEED_QUANT}}
-        -ngl {{.NGL_GPU}}
-        -c {{.QWEN27_CONTEXT_SPEED}}
-        --cache-type-k q8_0
-        --cache-type-v q8_0
-        --temp 0.7
-        --top-p 0.8
-        --top-k 20
-        --presence-penalty 1.5
-        --chat-template-kwargs '{"enable_thinking":false}'
-        --host {{.HOST}}
-        --port {{.PORT}}
-
-  server:gpu:qwen27b:quality:
-    desc: Start Qwen3.6-27B quality profile (UD-Q4_K_XL, 128k ctx, non-thinking)
-    deps: [build]
-    env:
-      GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
-      LLAMA_CACHE: '{{.TASKFILE_DIR}}/models/hf-cache'
-    cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-server
-        -hf {{.QWEN27_REPO}}:{{.QWEN27_QUALITY_QUANT}}
-        -ngl {{.NGL_GPU}}
-        -c {{.QWEN27_CONTEXT_QUALITY}}
-        --cache-type-k bf16
-        --cache-type-v bf16
-        --temp 0.7
-        --top-p 0.8
-        --top-k 20
-        --presence-penalty 1.5
-        --chat-template-kwargs '{"enable_thinking":false}'
-        --host {{.HOST}}
-        --port {{.PORT}}
-
-  server:cpu:e4b:
-    desc: Start Gemma 4 E4B on CPU only
-    cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-server
-        -hf {{.MODEL_E4B}}
-        -ngl {{.NGL_CPU}}
-        -c {{.E4B_CONTEXT}}
-        --host {{.HOST}}
-        --port {{.PORT}}
-
-  server:gpu:e4b:
-    desc: Start Gemma 4 E4B on GPU using the default E4B context (8k)
-    cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-server
-        -hf {{.MODEL_E4B}}
-        -ngl {{.NGL_GPU}}
-        -c {{.E4B_CONTEXT}}
-        --host {{.HOST}}
-        --port {{.PORT}}
-
-  server:gpu:e4b:128k:um:
-    desc: Start Gemma 4 E4B on GPU with 128k context and unified memory
-    env:
-      GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
-    cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-server
-        -hf {{.MODEL_E4B}}
-        -ngl {{.NGL_GPU}}
-        -c 131072
-        --host {{.HOST}}
-        --port {{.PORT}}
-
-  server:gpu:26b:32k:um:
-    desc: Start Gemma 4 26B A4B on GPU with 32k context and unified memory
-    env:
-      GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
-    cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-server
-        -m {{.MODEL_26B}}
-        --mmproj {{.MMPROJ_26B}}
-        -ngl {{.NGL_GPU}}
-        -c 32768
-        --host {{.HOST}}
-        --port {{.PORT}}
-
-  server:gpu:26b:128k:um:
-    desc: Start Gemma 4 26B A4B on GPU with 128k context and unified memory
-    env:
-      GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
-    cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-server
-        -m {{.MODEL_26B}}
-        --mmproj {{.MMPROJ_26B}}
-        -ngl {{.NGL_GPU}}
-        -c 131072
-        --host {{.HOST}}
-        --port {{.PORT}}
-
-  scanner:start:
-    desc: Start a background llama-server instance for go_scanner
+  server:embed:
+    desc: Start the BGE-M3 embedding server
     deps: [build]
     cmds:
       - >-
+        ./{{.BUILD_DIR}}/bin/llama-server
+        --hf-repo {{.EMBED_REPO}}
+        --hf-file {{.EMBED_FILE}}
+        --alias bge-m3-embed
+        --embeddings
+        --pooling mean
+        --embd-normalize 2
+        -ngl 99
+        -c 8192
+        --flash-attn on
+        --host {{.HOST}}
+        --port {{.EMBED_PORT}}
+
+  server:embed:start:
+    desc: Start the BGE-M3 embedding server in the background
+    deps: [build]
+    cmds:
+      - |
         bash -lc '
         set -euo pipefail
-        PIDFILE={{.SCANNER_PIDFILE}}
-        LOGFILE={{.SCANNER_LOGFILE}}
-        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-          echo "llama.cpp scanner server already running (pid $(cat "$PIDFILE"))"
+        PIDFILE={{.EMBED_PIDFILE}}
+        LOGFILE={{.EMBED_LOGFILE}}
+        if [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+          echo "embedding server already running (pid $(cat "$PIDFILE"))"
           exit 0
         fi
         rm -f "$PIDFILE"
         ./{{.BUILD_DIR}}/bin/llama-server \
-          -hf {{.MODEL_E4B}} \
-          -ngl {{.NGL_GPU}} \
-          -c {{.E4B_CONTEXT}} \
+          --hf-repo {{.EMBED_REPO}} \
+          --hf-file {{.EMBED_FILE}} \
+          --alias bge-m3-embed \
+          --embeddings \
+          --pooling mean \
+          --embd-normalize 2 \
+          -ngl 99 \
+          -c 8192 \
+          --flash-attn on \
           --host {{.HOST}} \
-          --port {{.PORT}} > "$LOGFILE" 2>&1 &
+          --port {{.EMBED_PORT}} > "$LOGFILE" 2>&1 &
         echo $! > "$PIDFILE"
-        for i in $(seq 1 120); do
-          if curl -fsS http://{{.HOST}}:{{.PORT}}/health >/dev/null 2>&1; then
-            echo "llama.cpp scanner server is healthy (pid $(cat "$PIDFILE"))"
-            exit 0
-          fi
+        for _ in $(seq 1 120); do
+          curl -fsS http://{{.HOST}}:{{.EMBED_PORT}}/health >/dev/null 2>&1 && exit 0
+          kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { tail -n 100 "$LOGFILE"; exit 1; }
           sleep 1
-          if ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-            echo "llama.cpp scanner server crashed during startup"
-            tail -n 200 "$LOGFILE" || true
-            exit 1
-          fi
         done
-        echo "timeout waiting for llama.cpp scanner server health"
-        tail -n 200 "$LOGFILE" || true
+        tail -n 100 "$LOGFILE"
         exit 1
         '
 
-  scanner:stop:
-    desc: Stop the background llama-server instance used by go_scanner
+  server:embed:stop:
+    desc: Stop the background BGE-M3 embedding server
     cmds:
-      - >-
+      - |
         bash -lc '
-        set -euo pipefail
-        PIDFILE={{.SCANNER_PIDFILE}}
-        if [ ! -f "$PIDFILE" ]; then
-          echo "llama.cpp scanner server is not running"
+        PIDFILE={{.EMBED_PIDFILE}}
+        if [ ! -s "$PIDFILE" ]; then
+          echo "embedding server is not running"
           exit 0
         fi
-        PID="$(cat "$PIDFILE")"
+        PID=$(cat "$PIDFILE")
         if kill -0 "$PID" 2>/dev/null; then
-          kill "$PID" || true
-          for i in $(seq 1 30); do
-            if ! kill -0 "$PID" 2>/dev/null; then
-              break
-            fi
-            sleep 0.2
+          kill "$PID"
+          for _ in $(seq 1 10); do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
           done
-          if kill -0 "$PID" 2>/dev/null; then
-            kill -9 "$PID" || true
-          fi
-          echo "llama.cpp scanner server stopped"
-        else
-          echo "stale pidfile detected"
         fi
         rm -f "$PIDFILE"
         '
 
-  scanner:status:
-    desc: Show status of the background llama-server instance used by go_scanner
+  server:embed:status:
+    desc: Show BGE-M3 embedding server status
     cmds:
-      - >-
+      - |
         bash -lc '
-        set -euo pipefail
-        PIDFILE={{.SCANNER_PIDFILE}}
-        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-          echo "running (pid $(cat "$PIDFILE"))"
-          curl -fsS http://{{.HOST}}:{{.PORT}}/health || true
-          echo
-          exit 0
+        PIDFILE={{.EMBED_PIDFILE}}
+        if [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+          echo "embedding server running (pid $(cat "$PIDFILE"))"
+        else
+          echo "embedding server is not running"
+          exit 1
         fi
-        echo "not running"
-        exit 1
         '
 
-  cli:cpu:e4b:
-    desc: Run Gemma 4 E4B in llama-cli on CPU only
+  smoke:embed:
+    desc: Send a test embedding request
     cmds:
       - >-
-        ./{{.BUILD_DIR}}/bin/llama-cli
-        -hf {{.MODEL_E4B}}
-        -ngl {{.NGL_CPU}}
-        -c {{.E4B_CONTEXT}}
+        curl -fsS http://{{.HOST}}:{{.EMBED_PORT}}/v1/embeddings
+        -H 'Content-Type: application/json'
+        -d '{"model":"bge-m3-embed","input":"embedding smoke test"}'
 
-  cli:gpu:e4b:
-    desc: Run Gemma 4 E4B in llama-cli on GPU using the default E4B context (8k)
+  router:models:
+    desc: List models known to the running router
     cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-cli
-        -hf {{.MODEL_E4B}}
-        -ngl {{.NGL_GPU}}
-        -c {{.E4B_CONTEXT}}
+      - curl -fsS http://{{.HOST}}:{{.PORT}}/models
 
-  cli:gpu:26b:32k:um:
-    desc: Run Gemma 4 26B A4B in llama-cli on GPU with 32k context and unified memory
-    env:
-      GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
+  router:reload:
+    desc: Reload router profiles from models-router.ini
     cmds:
-      - >-
-        ./{{.BUILD_DIR}}/bin/llama-cli
-        -m {{.MODEL_26B}}
-        --mmproj {{.MMPROJ_26B}}
-        -ngl {{.NGL_GPU}}
-        -c 32768
-
-  smoke:cpu:e4b:
-    desc: Start a temporary CPU server for E4B, run an HTTP smoke test, then stop it
-    cmds:
-      - >-
-        bash -lc '
-        set -euo pipefail
-        LOG=/tmp/llama-task-cpu-e4b.log
-        PIDFILE=/tmp/llama-task-cpu-e4b.pid
-        rm -f "$LOG" "$PIDFILE"
-        ./{{.BUILD_DIR}}/bin/llama-server \
-          -hf {{.MODEL_E4B}} \
-          -ngl {{.NGL_CPU}} \
-          -c 2048 \
-          --host {{.HOST}} \
-          --port {{.PORT}} > "$LOG" 2>&1 &
-        echo $! > "$PIDFILE"
-        cleanup() {
-          kill "$(cat "$PIDFILE")" 2>/dev/null || true
-          wait "$(cat "$PIDFILE")" 2>/dev/null || true
-        }
-        trap cleanup EXIT
-        for i in $(seq 1 120); do
-          if curl -fsS http://{{.HOST}}:{{.PORT}}/health >/tmp/llama-task-health.json 2>/dev/null; then
-            break
-          fi
-          sleep 1
-          kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { tail -n 200 "$LOG"; exit 1; }
-        done
-        curl -fsS http://{{.HOST}}:{{.PORT}}/v1/chat/completions \
-          -H "Content-Type: application/json" \
-          -d "{\"model\":\"llama.cpp\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: {{.TEST_PROMPT_E4B}}\"}],\"max_tokens\":32,\"temperature\":0}"
-        echo
-        tail -n 40 "$LOG"
-        '
-
-  smoke:gpu:e4b:
-    desc: Start a temporary GPU server for E4B, run an HTTP smoke test, then stop it
-    cmds:
-      - >-
-        bash -lc '
-        set -euo pipefail
-        LOG=/tmp/llama-task-gpu-e4b.log
-        PIDFILE=/tmp/llama-task-gpu-e4b.pid
-        rm -f "$LOG" "$PIDFILE"
-        ./{{.BUILD_DIR}}/bin/llama-server \
-          -hf {{.MODEL_E4B}} \
-          -ngl {{.NGL_GPU}} \
-          -c 2048 \
-          --host {{.HOST}} \
-          --port {{.PORT}} > "$LOG" 2>&1 &
-        echo $! > "$PIDFILE"
-        cleanup() {
-          kill "$(cat "$PIDFILE")" 2>/dev/null || true
-          wait "$(cat "$PIDFILE")" 2>/dev/null || true
-        }
-        trap cleanup EXIT
-        for i in $(seq 1 120); do
-          if curl -fsS http://{{.HOST}}:{{.PORT}}/health >/tmp/llama-task-health.json 2>/dev/null; then
-            break
-          fi
-          sleep 1
-          kill -0 "$(cat "$PIDFILE")" 2>/dev/null || { tail -n 200 "$LOG"; exit 1; }
-        done
-        curl -fsS http://{{.HOST}}:{{.PORT}}/v1/chat/completions \
-          -H "Content-Type: application/json" \
-          -d "{\"model\":\"llama.cpp\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: {{.TEST_PROMPT_E4B}}\"}],\"max_tokens\":32,\"temperature\":0}"
-        echo
-        tail -n 40 "$LOG"
-        '
+      - curl -fsS 'http://{{.HOST}}:{{.PORT}}/models?reload=1'
