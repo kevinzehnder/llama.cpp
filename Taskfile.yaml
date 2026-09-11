@@ -7,17 +7,12 @@ vars:
   HOST: 127.0.0.1
   PORT: '8080'
   ROUTER_PRESET: '{{.TASKFILE_DIR}}/models-router.ini'
+  CONTEXT_SIZES: '4096,8192,12288,16384'
   EMBED_PORT: '8081'
   EMBED_REPO: 'ggml-org/bge-m3-Q8_0-GGUF'
   EMBED_FILE: 'bge-m3-q8_0.gguf'
   EMBED_PIDFILE: /tmp/llamacpp-embed.pid
   EMBED_LOGFILE: /tmp/llamacpp-embed.log
-
-env:
-  GGML_CUDA_ENABLE_UNIFIED_MEMORY: '1'
-  OMP_NUM_THREADS: '6'
-  OMP_DYNAMIC: 'false'
-  OMP_PROC_BIND: 'true'
 
 tasks:
   default:
@@ -73,6 +68,18 @@ tasks:
         --host {{.HOST}}
         --port {{.PORT}}
 
+  server:fzf_model_runner:
+    desc: Select a model and start it as a single-model server
+    deps: [build]
+    cmds:
+      - >-
+        python3 ./scripts/fzf-model-runner.py
+        {{.ROUTER_PRESET}}
+        ./{{.BUILD_DIR}}/bin/llama-server
+        {{.HOST}}
+        {{.PORT}}
+        --context-sizes {{.CONTEXT_SIZES}}
+
   server:embed:
     desc: Start the BGE-M3 embedding server
     deps: [build]
@@ -85,7 +92,8 @@ tasks:
         --embeddings
         --pooling mean
         --embd-normalize 2
-        -ngl 99
+        -ngl auto
+        --fit-target 1024
         -c 8192
         --flash-attn on
         --host {{.HOST}}
@@ -112,7 +120,8 @@ tasks:
           --embeddings \
           --pooling mean \
           --embd-normalize 2 \
-          -ngl 99 \
+          -ngl auto \
+          --fit-target 1024 \
           -c 8192 \
           --flash-attn on \
           --host {{.HOST}} \
