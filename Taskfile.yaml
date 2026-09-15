@@ -4,7 +4,10 @@ vars:
   BUILD_DIR: build
   BUILD_TYPE: Release
   CUDA_ARCH: '86'
+  # HOST is only used by local health checks and client tasks. llama-server
+  # listens on BIND_HOST so other machines on the LAN can reach it.
   HOST: 127.0.0.1
+  BIND_HOST: 0.0.0.0
   PORT: '8080'
   ROUTER_PRESET: '{{.TASKFILE_DIR}}/models-router.ini'
   CONTEXT_SIZES: '4096,8192,12288,16384'
@@ -26,8 +29,9 @@ tasks:
       - echo "BUILD_DIR={{.BUILD_DIR}}"
       - echo "ROUTER_PRESET={{.ROUTER_PRESET}}"
       - echo "SERVER=./{{.BUILD_DIR}}/bin/llama-server"
-      - echo "ROUTER=http://{{.HOST}}:{{.PORT}}"
-      - echo "EMBEDDINGS=http://{{.HOST}}:{{.EMBED_PORT}}"
+      - echo "BIND={{.BIND_HOST}}"
+      - echo "ROUTER (local)=http://{{.HOST}}:{{.PORT}}"
+      - echo "EMBEDDINGS (local)=http://{{.HOST}}:{{.EMBED_PORT}}"
 
   configure:
     desc: Configure llama.cpp with CUDA enabled for RTX 3070 (sm_86)
@@ -56,7 +60,7 @@ tasks:
       - nvidia-smi
 
   server:router:
-    desc: Start the local model router
+    desc: Start the LAN-accessible model router
     deps: [build]
     cmds:
       - >-
@@ -65,7 +69,7 @@ tasks:
         --models-max 1
         --sleep-idle-seconds 120
         --flash-attn on
-        --host {{.HOST}}
+        --host {{.BIND_HOST}}
         --port {{.PORT}}
 
   server:fzf_model_runner:
@@ -76,7 +80,7 @@ tasks:
         python3 ./scripts/fzf-model-runner.py
         {{.ROUTER_PRESET}}
         ./{{.BUILD_DIR}}/bin/llama-server
-        {{.HOST}}
+        {{.BIND_HOST}}
         {{.PORT}}
         --context-sizes {{.CONTEXT_SIZES}}
 
@@ -96,7 +100,7 @@ tasks:
         --fit-target 1024
         -c 8192
         --flash-attn on
-        --host {{.HOST}}
+        --host {{.BIND_HOST}}
         --port {{.EMBED_PORT}}
 
   server:embed:start:
@@ -124,7 +128,7 @@ tasks:
           --fit-target 1024 \
           -c 8192 \
           --flash-attn on \
-          --host {{.HOST}} \
+          --host {{.BIND_HOST}} \
           --port {{.EMBED_PORT}} > "$LOGFILE" 2>&1 &
         echo $! > "$PIDFILE"
         for _ in $(seq 1 120); do
