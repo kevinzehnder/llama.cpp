@@ -100,7 +100,7 @@ tasks:
         --fit-target 1024
         -c 8192
         --flash-attn on
-        --host {{.BIND_HOST}}
+        --host {{.HOST}}
         --port {{.EMBED_PORT}}
 
   server:embed:start:
@@ -128,7 +128,7 @@ tasks:
           --fit-target 1024 \
           -c 8192 \
           --flash-attn on \
-          --host {{.BIND_HOST}} \
+          --host {{.HOST}} \
           --port {{.EMBED_PORT}} > "$LOGFILE" 2>&1 &
         echo $! > "$PIDFILE"
         for _ in $(seq 1 120); do
